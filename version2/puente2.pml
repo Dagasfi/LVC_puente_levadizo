@@ -11,6 +11,8 @@ int max_crossing_time = 2;
 int max_waiting_time = 2;
 int max_rt = 1;
 int max_lt = 1;
+bool moving_bridge = 0;
+
 int semaphore_time; // por ahora no he visto como implementar esta funcionalidad.
 
 chan action = [0] of {mtype, int, pid}; // El int se usa para pasar el orden de los coches (el uid del coche) para asegurar que haya un orden (y barcos)
@@ -70,7 +72,7 @@ active [3] proctype ship() {
 }
 
 active proctype brdige(){
-	bool moving_bridge = 0;
+	
 	int raising_time = 0;
 	int lowering_time = 0;
 	start : do
@@ -106,5 +108,23 @@ active proctype brdige(){
 		
 }
 
+// Garantizar que no se sobrepase el número máximo de coches permitidos cruzando simultáneamente el puente.
+ltl max_cars { [] (car_count <= max_car)}
 
+//Garantizar que no se sobrepase el número máximo de barcos permitidos cruzando simultáneamente el puente.
+ltl max_ships { [] (ship_count <= max_ship)}
 
+//Garantizar que un coche no cruza hasta que se baje el puente.
+ltl crossing_cars { []  ( (bridge_state == lowered) -> (ship_count == 0) )}
+
+// Garantizar que un barco no cruza hasta que se suba el puente.
+ltl crossing_ships { []  ( (bridge_state == raised) -> (car_count == 0) )} 
+
+//Garantizar que el puente no se mueve si hay algún vehículo cruzando.
+ltl no_moving_bridge {[] ( (moving_bridge == 1) -> (car_count == 0 && ship_count == 0) ) } 
+
+// Si un barco pide para pasar, en algun momento pasara.
+// ltl ship_asks {[] ()  } 
+
+// Si un coche pide para pasar, en algun momento pasara.
+// ltl car_asks {[] ()  } 
