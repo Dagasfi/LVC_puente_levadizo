@@ -1,0 +1,469 @@
+<!DOCTYPE html>
+<html>
+<head>
+	<title>
+		Puente_levadizo
+	</title>
+	<style type="text/css">
+		code { 
+		    background: hsl(0deg 0% 100% / 0%); 
+		}
+
+		pre {
+		    white-space: pre-wrap;
+		    background: hsl(30deg 100% 88% / 58%);
+		}
+
+		.container {
+			margin: 0 auto;
+			width: 80%;
+		}
+		.center {
+			  display: block;
+			  margin-left: auto;
+			  margin-right: auto;
+			  width: 50%;
+			}
+
+		.bridge_img {
+			height:189.0px;
+			width:355.0px;
+		}
+	</style>
+</head>
+<body>
+
+	<div class="container">
+		
+		<h1 style="border-bottom:1.0px solid blue; color:blue; font-style:italic"><span style="font-size:25.0px"><strong>Puente levadizo</strong></span></h1>
+
+		<p><img class="center bridge_img" alt="" src="img_puente.jpg" /></p>
+
+		<p style="text-align:left"><strong style="color:inherit; font-weight:700">Daniel Gaspar Figueiredo</strong></p>
+
+		<h2 style="border-bottom:1.0px solid blue; color:blue">Descripci&oacute;n</h2>
+
+		<p><em>Una ciudad est&aacute; separada en dos zonas por un r&iacute;o. Para circular entre ambas zonas solo se&nbsp;puede acceder en autom&oacute;vil a trav&eacute;s de un puente levadizo que las conecta. A su vez, por&nbsp;el r&iacute;o circulan barcos de carga y descarga de mercanc&iacute;as. Nuestro sistema ser&aacute; el encargado&nbsp;de controlar el estado del puente levadizo y de dar orden de paso a los veh&iacute;culos o a los&nbsp;barcos.</em></p>
+
+		<p><br />
+		<em>Cabe destacar que mientras el puente est&eacute; levantado solo podr&aacute;n pasar los barcos, en caso&nbsp;contrario, solo podr&aacute;n pasar los coches.&nbsp;Para este sistema se van a proponer unos m&aacute;ximos de coches y/o barcos circulando a la vez.<br />
+		En el Esquema del sistema se pueden ver los agentes y las comunicaciones que se proponen.</em><br />
+		<em>El objetivo de verificaci&oacute;n es asegurar&nbsp;que no haya conflictos de concurrencia en el pasaje de los veh&iacute;culos. Debemos poder asegurar que tanto coches como barcos pasan cuando deben de pasar para evitar accidentes o incluso p&eacute;rdidas humanas.</em></p>
+
+		<h2 style="border-bottom:1.0px solid blue; color:blue">Modelo</h2>
+
+		<p><em>Se han tomado las siguientes decisiones en cuanto al modelado del sistema</em></p>
+
+		<p>El modelo tendr&aacute; 3 agentes (barco, coche, puente) y un &uacute;nico canal de comunicaci&oacute;n global.</p>
+
+		<p>Estos 3 agentes actuar&aacute;n en funci&oacute;n de los estados que tenga cada instancia.</p>
+
+		<ul>
+			<li>Se considera un m&aacute;ximo de 3 instancias de cada agente (excepto del puente, que solo tendr&aacute; una instancia</li>
+			<li>El puente tendr&aacute; una capacidad m&aacute;xima de 2 veh&iacute;culos similares (del mismo tipo) cruzando a la vez.</li>
+			<li>El puente ser&aacute; el orquestador de los dem&aacute;s agentes.</li>
+			<li>Se pretende que el sistema sea realista, por lo que se ha a&ntilde;adido un tiempo de cruzado (ver variables internas de los agentes) y un tiempo para bajar o levantar&nbsp;del puente.</li>
+		</ul>
+
+		<p>Se ha limitado a 3 veh&iacute;culos porque queremos probar que es posible tener concurrencia en el puente (tener mas de 1 vehiculo a la vez) y a su vez, queremos probar que si el puente esta lleno, el &uacute;ltimo veh&iacute;culo se espera para cruzar.&nbsp;</p>
+
+		<p>En cuanto a la implementaci&oacute;n, los agentes los implementaremos usando un array de proctypes:</p>
+
+		<pre>
+		<code>active [3] proctype car() {
+		...
+		}
+		active [3] proctype ship() {
+		...
+		}
+		active proctype brdige(){
+		...
+		}</code></pre>
+
+		<p>Cada uno de estos agentes tendr&aacute; unas variables internas para poder gestionar el estado de cada una de las instancias. Las variables que se van a usar son las siguientes:</p>
+
+		<pre>
+		<code>//Para todos
+		pid my_id = _pid;
+		int crossing_time = 0;
+		int waiting_time = 0;
+		mtype s_response;
+		bool asked = 0;
+
+		//Para los coches
+		mtype car_state = waiting;
+
+		//para los barcos
+		mtype ship_state = waiting;
+		</code></pre>
+
+		<p>Las variables ` *_state`&nbsp;&nbsp;podr&aacute;n tomar &uacute;nicamente 2 valores: {waiting, crossing}. Cuando &quot;aparece&quot; un veh&iacute;culo, este se pone directamente en espera, pues no puede actuar sin que el agente `puente` le ordene. El resto de variables servir&aacute;n para simular el tiempo cruzando el puente, para saber si esta instancia ya ha enviado una petici&oacute;n para cruzar el puente para evitar enviar m&uacute;ltiples peticiones. Adem&aacute;s tambi&eacute;n se usa una variable para guardar la respuesta a una petici&oacute;n. Esta variable (`s_response`) puede tomar los valores {ship_wait, ship_cross, car_wait, car_cross}.</p>
+
+		<p>Las acciones que realizan los agentes (coches y barcos) ser&aacute;n las de pedir el paso, recibir una respuesta o cruzar el puente. Para ello se implementar&aacute; de la siguiente forma:</p>
+
+		<pre>
+		<code>:: atomic { (asked == 0 &amp;&amp; car_state != crossing  &amp;&amp; cur_seq_car &lt; max_seq_car) -&gt; ask_cross[my_id] = 1; action!car_ask,1, my_id; asked = 1 }
+
+		:: atomic {
+					(car_state == crossing) -&gt;
+						if
+							...
+						fi
+					}
+		:: atomic{ (asked == 1) -&gt;
+					response?s_response, 1, eval(my_id);
+					if
+						...
+					fi
+					}</code></pre>
+
+		<p>El ejemplo es del agente coche.</p>
+
+		<p>El canal de comunicaci&oacute;n tendr&aacute; 3 variables asociadas, estas ser&aacute;n: la acci&oacute;n a realizar, el ID del TIPO de vehiculo y el ID del veh&iacute;culo.</p>
+
+		<p>Para los coches usaremos el &quot;id de tipo vehiculo = 1&quot; y para los barcos usaremos&nbsp;el &quot;id de tipo vehiculo = 2&quot;. Es importante que se env&iacute;e el ID del veh&iacute;culo para que el puente sepa qui&eacute;n env&iacute;a la petici&oacute;n y a qui&eacute;n debe responder.</p>
+
+		<p>&nbsp;</p>
+
+		<p>El puente tratar&aacute; las peticiones una tras otra de forma at&oacute;mica. No &quot;leer&aacute;&quot; una segunda petici&oacute;n &nbsp;hasta que no termine todo el tratamiento de la primera. Las casu&iacute;sticas detectadas han sido las siguientes:</p>
+
+		<ul>
+			<li>Para peticiones provenientes de los coches:
+			<ul>
+				<li>El puente est&aacute; bajado
+				<ul>
+					<li>El coche que pide, cabe en el puente (no llega al m&aacute;ximo de coches): <strong>Le responde que cruce</strong></li>
+					<li>El coche que pide no cabe en el puente:&nbsp;<strong>Le responde que espere</strong></li>
+				</ul>
+				</li>
+				<li>El puente esta levantado: En cualquier caso&nbsp;<strong>Le responde que espere</strong>
+				<ul>
+					<li>Si hay barcos cruzando:&nbsp;<strong>Le responde que espere</strong></li>
+					<li>Si no hay barcos cruzando: Baja el puente y&nbsp;<strong>Le responde que espere.</strong></li>
+				</ul>
+				</li>
+				<li><span style="color:#3498db">Han habido al menos 3 coches antes que han pedido para cruzar y no ha cruzado ning&uacute;n barco desde entonces:&nbsp;<strong>Le responde que espere</strong></span></li>
+			</ul>
+			</li>
+		</ul>
+
+		<ul>
+			<li>Para peticiones provenientes de los barcos:
+			<ul>
+				<li>El puente est&aacute; levantado
+				<ul>
+					<li>El barco&nbsp;que pide, cabe en el puente (no llega al m&aacute;ximo de barcos): <strong>Le responde que cruce</strong></li>
+					<li>El barco que pide no cabe en el puente:&nbsp;<strong>Le responde que espere</strong></li>
+				</ul>
+				</li>
+				<li>El puente esta bajado: En cualquier caso&nbsp;<strong>Le responde que espere</strong>
+				<ul>
+					<li>Si hay coches&nbsp;cruzando:&nbsp;<strong>Le responde que espere</strong></li>
+					<li>Si no hay coches&nbsp;cruzando: Levanta&nbsp;el puente y&nbsp;<strong>Le responde que espere.</strong></li>
+				</ul>
+				</li>
+				<li><span style="color:#3498db">Han habido al menos <u><strong>1</strong></u>&nbsp;barcos&nbsp;antes que han pedido para cruzar y no ha cruzado ning&uacute;n coche&nbsp;desde entonces:&nbsp;<strong>Le responde que espere</strong></span></li>
+			</ul>
+			</li>
+		</ul>
+
+		<p><span style="color:#3498db"></span></p>
+
+		<p>Las casu&iacute;sticas anteriores, <span style="color:#3498db">marcadas en azul </span>sirven para implementar justicia y no permitir que crucen barcos sin parar, dejando a los coches parados y esperando infinitamente.</p>
+
+		<p><em>El modelo formal PROMELA es el siguiente:</em></p>
+
+		<pre>
+		<code>
+			mtype = {car_ask, ship_ask, car_wait, ship_wait, car_cross, ship_cross, crossing, waiting, raise_bridge, lower_bridge,  raising, lowering, raised, lowered, car_end, ship_end};
+		mtype bridge_state =  lowered;
+		mtype order;
+		int car_count = 0;
+		int ship_count = 0;
+		int max_car = 2;
+		int max_ship = 2;
+		int type_id;
+		pid vehicle_id;
+		int max_crossing_time = 2;
+		int max_waiting_time = 2;
+		int max_rt = 1;
+		int max_lt = 1;
+		bool moving_bridge = 0;
+
+		int max_seq_car = 3;
+		int max_seq_ship = 1;
+		int cur_seq_car = 0;
+		int cur_seq_ship = 0;
+
+		byte ask_cross[6];
+
+		int semaphore_time; // por ahora no he visto como implementar esta funcionalidad.
+
+		chan action = [0] of {mtype, int, pid}; // El int se usa para pasar el orden de los coches (el uid del coche) para asegurar que haya un orden (y barcos)
+		chan response = [0] of {mtype, int, pid }; 
+
+
+		active [3] proctype car() {
+			pid my_id = _pid;
+			mtype car_state = waiting;
+			int crossing_time = 0;
+			int waiting_time = 0;
+			mtype s_response;
+			bool asked = 0;
+			do
+				:: atomic { (asked == 0 &amp;&amp; car_state != crossing  &amp;&amp; cur_seq_car &lt; max_seq_car) -&gt; ask_cross[my_id] = 1; action!car_ask,1, my_id; asked = 1 }
+				:: atomic {
+					(car_state == crossing) -&gt;
+						if
+							:: (crossing_time &lt; max_crossing_time) -&gt; crossing_time ++
+							:: (crossing_time &gt;= max_crossing_time )	-&gt; ask_cross[my_id] = 0; car_state = waiting; crossing_time = 0; asked = 0; action!car_end,2, my_id
+						fi
+					}
+				 :: atomic{ (asked == 1) -&gt;
+					response?s_response, 1, eval(my_id);
+					if
+						:: (s_response == car_wait) -&gt; car_state = waiting; asked = 0
+						:: (s_response == car_cross) -&gt; ask_cross[my_id] = 2; car_state = crossing; asked = 0
+					fi
+					}
+			od
+		}
+
+		active [3] proctype ship() {
+			pid my_id = _pid;
+			mtype ship_state = waiting;
+			int crossing_time = 0;
+			int waiting_time = 0;
+			mtype s_response;
+			bool asked = 0;
+			do
+				:: atomic { (asked == 0 &amp;&amp; ship_state != crossing &amp;&amp; cur_seq_ship &lt; max_seq_ship) -&gt; ask_cross[my_id] = 1;  action!ship_ask,2, my_id; asked = 1 } 
+				:: atomic {
+					(ship_state == crossing) -&gt;
+						if
+							:: (crossing_time &lt; max_crossing_time) -&gt; crossing_time ++
+							:: (crossing_time &gt;= max_crossing_time )	-&gt; ask_cross[my_id] = 0 ; ship_state = waiting; crossing_time = 0; asked = 0; action!ship_end,2, my_id
+						fi
+					}
+				:: atomic{ (asked == 1) -&gt; 
+					response?s_response, 2, eval(my_id);
+					if
+						:: (s_response == ship_wait) -&gt; ship_state = waiting; asked = 0
+						:: (s_response == ship_cross) -&gt; ask_cross[my_id] = 2; ship_state = crossing; asked = 0
+					fi
+					}
+			od
+		}
+
+		active proctype brdige(){
+			
+			int raising_time = 0;
+			int lowering_time = 0;
+			start : do
+				:: atomic { (moving_bridge == 0) -&gt; action?order, type_id, vehicle_id;
+					if
+						:: (order == car_ask &amp;&amp; bridge_state == lowered &amp;&amp; car_count &lt; max_car) -&gt;  cur_seq_ship = 0; cur_seq_car++; car_count++; response!car_cross,type_id, vehicle_id
+						:: (order == ship_ask &amp;&amp; bridge_state == raised &amp;&amp; ship_count &lt; max_ship) -&gt; cur_seq_car = 0; cur_seq_ship++; ship_count++; response!ship_cross,type_id, vehicle_id
+
+						:: (order == car_ask &amp;&amp; cur_seq_car &gt;= max_seq_car) -&gt; response!car_wait,type_id, vehicle_id
+						:: (order == ship_ask &amp;&amp; cur_seq_ship &gt;= max_seq_ship) -&gt; response!ship_wait,type_id, vehicle_id
+
+
+						:: (order == car_ask &amp;&amp; bridge_state == raised &amp;&amp; ship_count &gt; 0) -&gt; response!car_wait,type_id, vehicle_id
+						:: (order == ship_ask &amp;&amp; bridge_state == lowered &amp;&amp; car_count &gt; 0) -&gt; response!ship_wait,type_id, vehicle_id
+						
+						:: (order == car_ask &amp;&amp; bridge_state == lowered &amp;&amp; car_count &gt;= max_car) -&gt; response!car_wait,type_id, vehicle_id
+						:: (order == ship_ask &amp;&amp; bridge_state == raised &amp;&amp; ship_count &gt;= max_ship) -&gt; response!ship_wait,type_id, vehicle_id
+						
+						:: (order == car_end) -&gt;  car_count--
+						:: (order == ship_end) -&gt;  ship_count--
+						:: (order == car_ask &amp;&amp; bridge_state == raised &amp;&amp; ship_count == 0) -&gt;bridge_state = lowering; moving_bridge = 1 
+						:: (order == ship_ask &amp;&amp; bridge_state == lowered &amp;&amp; car_count == 0) -&gt;bridge_state = raising; moving_bridge = 1 
+					fi
+
+				}
+				:: atomic { (moving_bridge == 1) -&gt; 
+					if
+						:: (bridge_state == raising &amp;&amp; raising_time &lt; max_rt ) -&gt; raising_time ++
+						:: (bridge_state == lowering &amp;&amp; lowering_time &lt; max_lt) -&gt; lowering_time ++
+						:: (bridge_state == raising &amp;&amp; raising_time &gt;= max_rt) -&gt; cur_seq_car = 0; cur_seq_ship++; raising_time = 0; bridge_state = raised; ship_count ++; moving_bridge = 0; response!ship_cross,type_id, vehicle_id
+						:: (bridge_state == lowering &amp;&amp; lowering_time &gt;= max_lt) -&gt; cur_seq_ship = 0; cur_seq_car++; lowering_time = 0; bridge_state = lowered; car_count ++; moving_bridge = 0; response!car_cross,type_id, vehicle_id 
+					fi
+
+				 }
+			od
+				
+		}
+
+
+		</code>
+		</pre>
+
+		<p>&nbsp;</p>
+
+		<p>&nbsp;</p>
+
+		<h3 style="border-bottom:1.0px solid blue; color:blue; font-style:italic">Refinamientos del modelo</h3>
+
+		<p>Se ha remodelado porque:</p>
+
+		<ul>
+			<li>Hab&iacute;a&nbsp;<em>deadlocks</em></li>
+			<li>Los procesos ten&iacute;an un estado&nbsp;<em>waiting</em>&nbsp;que no serv&iacute;a</li>
+			<li>Errores de sintaxis: Un canal tenia solo 1 par&aacute;metro definido y cuando se usaba se enviaban m&aacute;s datos.</li>
+			<li>Se ha a&ntilde;adido el tratamiento de&nbsp;<em>raising</em>&nbsp;y&nbsp;<em>lowering</em>&nbsp;del puente.</li>
+			<li>Cuando el l&iacute;mite de coches estaba cruzando el puente y llegaba otra petici&oacute;n, no se trataba: Se ha a&ntilde;adido el caso <code>(order == car_ask &amp;&amp; bridge_state == lowered &amp;&amp; car_count &gt;= max_car)</code>&nbsp; y su an&aacute;logo para el barco.</li>
+			<li>Se ha hecho distinci&oacute;n de los estados tanto del puente como de los dem&aacute;s agentes:
+			<ul>
+				<li>El puente ahora est&aacute;&nbsp;:
+				<ul>
+					<li>movi&eacute;ndose</li>
+					<li>tratando peticiones</li>
+				</ul>
+				</li>
+				<li>Los dem&aacute;s agentes:
+				<ul>
+					<li>Cruzando</li>
+					<li>Enviando petici&oacute;n</li>
+					<li>Recibiendo respuesta</li>
+				</ul>
+				</li>
+			</ul>
+			</li>
+		</ul>
+
+		<p>Es decir, se ha eliminado el estado&nbsp;<em>waiting</em>.</p>
+
+		<p>Para poder hacer esta simulaci&oacute;n, se ha ampliado el espacio de b&uacute;squeda y la memoria.</p>
+
+		<p>Tras comprobar que todos estos cambios, aparentemente, funcionan, se han ampliado el numero de agentes, Ahora disponemos de 3 coches en total, y 3 barcos. Simult&aacute;neamente en el puente pueden haber 2 como m&aacute;ximo del mismo tipo.</p>
+
+		<p>&nbsp;</p>
+
+		<h3 style="border-bottom:1.0px solid blue; color:blue">Verificaci&oacute;n</h3>
+
+		<p><em>Los objetivos de verificaci&oacute;n son los siguientes:</em></p>
+
+		<ul>
+			<li><em>Garantizar que no se sobrepase el n&uacute;mero m&aacute;ximo de <u>coches</u> permitidos cruzando simult&aacute;neamente el puente.</em></li>
+			<li><em>Garantizar que no se sobrepase el n&uacute;mero m&aacute;ximo de <u>barcos</u>&nbsp;permitidos cruzando simult&aacute;neamente el puente.</em></li>
+			<li><em>Garantizar que si el puente esta subido, no hay coches cruzando</em></li>
+			<li><em>Garantizar que si el puente esta bajado, no hay barcos&nbsp;cruzando.</em></li>
+			<li><em>Garantizar que el puente no se mueve si hay alg&uacute;n veh&iacute;culo cruzando.</em></li>
+			<li><em>Garantizar que si el puente se esta moviendo, en alg&uacute;n momento terminar&aacute; de moverse para permitir a los veh&iacute;culos pasar.</em></li>
+			<li><em>Garantizar que si un veh&iacute;culo pide para cruzar, en alg&uacute;n momento pasar&aacute;.</em></li>
+		</ul>
+
+		<p><em>Lo que ha dado lugar a las siguientes propiedades LTL verificadas o refutadas:</em></p>
+
+		<p>&nbsp;</p>
+
+		<pre>
+		<code>ltl max_cars { [] (car_count &lt;= max_car)}
+
+		ltl max_ships { [] (ship_count &lt;= max_ship)}
+
+		ltl crossing_cars { []  ( (bridge_state == lowered) -&gt; (ship_count == 0) )}
+
+		ltl crossing_ships { []  ( (bridge_state == raised) -&gt; (car_count == 0) )} 
+
+		ltl no_moving_bridge {[] ( (moving_bridge == 1) -&gt; (car_count == 0 &amp;&amp; ship_count == 0) ) }
+
+		ltl bridge_states_raise { [] ( ( (moving_bridge == 1)  &amp;&amp; (bridge_state == raising) ) -&gt; &lt;&gt; ( ( moving_bridge == 0) &amp;&amp; (bridge_state == raised))) }
+
+		ltl bridge_states_lower {[] ( ( (moving_bridge == 1)  &amp;&amp; (bridge_state == lowering) ) -&gt; &lt;&gt; ( ( moving_bridge == 0) &amp;&amp; (bridge_state == lowered))) }
+
+		// ltl v_asks {[] ( ((ask_cross[0]==1) -&gt; &lt;&gt; (ask_cross[0] == 2 ) ) || ((ask_cross[1]==1) -&gt; &lt;&gt; (ask_cross[1] == 2 )) || ((ask_cross[2]==1) -&gt; &lt;&gt; (ask_cross[2] == 2 )) || ((ask_cross[3]==1) -&gt; &lt;&gt; (ask_cross[3] == 2 )) || ((ask_cross[4]==1) -&gt; &lt;&gt; (ask_cross[4] == 2 )) || ((ask_cross[5]==1) -&gt; &lt;&gt; (ask_cross[5] == 2 )) )}
+
+		//Nueva versión
+		ltl v_asks {[] ( ((ask_cross[0]==1) -&gt; &lt;&gt; (ask_cross[0] == 2 ) ) &amp;&amp; ((ask_cross[1]==1) -&gt; &lt;&gt; (ask_cross[1] == 2 )) &amp;&amp; ((ask_cross[2]==1) -&gt; &lt;&gt; (ask_cross[2] == 2 )) &amp;&amp; ((ask_cross[3]==1) -&gt; &lt;&gt; (ask_cross[3] == 2 )) &amp;&amp; ((ask_cross[4]==1) -&gt; &lt;&gt; (ask_cross[4] == 2 )) &amp;&amp; ((ask_cross[5]==1) -&gt; &lt;&gt; (ask_cross[5] == 2 )) )}</code></pre>
+
+		<p><strong>La &uacute;ltima propiedad no se ha podido verificar porque aunque se haya implementado justicia, est&aacute; a nivel de tipo de veh&iacute;culo y no a nivel de veh&iacute;culo individual. Por lo que no se puede asegurar que un veh&iacute;culo determinado pase. Para solucionar esto debemos combinar esta justicia con una gesti&oacute;n de colas o un&nbsp;sem&aacute;foro.</strong></p>
+
+		<h3 style="border-bottom:1.0px solid blue; color:blue">Refinamientos requeridos por la verificaci&oacute;n</h3>
+
+		<p>Para asegurar que no habr&aacute;&nbsp;<em>starvation&nbsp;</em>(inanici&oacute;n) se ha ampliado el modelo para que implemente justicia. Se han usado las variables enteras `max_seq_car`, `max_seq_ship`, `cur_seq_car`, `cur_seq_ship`.</p>
+
+		<p>`max_seq_*` sirve para establecer el numero m&aacute;ximo de veh&iacute;culos del mismo tipo que pasan seguidos. Se ha limitado a 3 porque los cambios de este valor u otro m&aacute;s alto no son significativos y debemos tener el modelo lo m&aacute;s simple posible. No se usan limites de 0-2 porque queremos que puedan haber al menos 2 veh&iacute;culos del mismo tipo a la vez en el barco y que un tercero se quede en espera.</p>
+
+		<p><u><strong>Cambio:&nbsp;</strong></u>Para relajar la justicia, solo pedimos 1 barco y 3 coches.</p>
+
+		<p>Adem&aacute;s, para poder controlar qu&eacute; veh&iacute;culos han pedido para cruzar o han cruzado&nbsp;cruzado&nbsp;se ha creado un vector de bytes de&nbsp;tama&ntilde;o 6 (1 por veh&iacute;culo)&nbsp;. Cada elemento de este vector podr&aacute; tener 3 valores:</p>
+
+		<ul>
+			<li>Valor &quot;0&quot;: Valor de inicializaci&oacute;n</li>
+			<li>Valor &quot;1&quot;: El veh&iacute;culo ha pedido para pasar.</li>
+			<li>Valor &quot;2&quot;: El veh&iacute;culo est&aacute; pasando.</li>
+		</ul>
+
+		<pre>
+		<code>byte ask_cross[6];</code></pre>
+
+		<p>De esta forma, la LTL para asegurarse que si un veh&iacute;culo pide para pasar (Valor &quot;1&quot;), entonces en alg&uacute;n momento cruzar&aacute; (Valor &quot;2&quot;) consiste en comprobar este vector.</p>
+
+		<p>Las verificaciones han dado lugar a cambios en el modelo:</p>
+
+		<ul>
+			<li>Actualizaci&oacute;n de variables para para implementar justicia</li>
+			<li>Actualizaci&oacute;n del vector &quot;<em>ask_cross</em>&quot;</li>
+		</ul>
+
+		<p>&nbsp;</p>
+
+		<pre>
+		<code>//para los coches (similar en barcos)...
+		:: atomic { (asked == 0 &amp;&amp; car_state != crossing  &amp;&amp; cur_seq_car &lt; max_seq_car) -&gt; ask_cross[my_id] = 1; action!car_ask,1, my_id; asked = 1 }
+
+		:: (crossing_time &gt;= max_crossing_time )	-&gt; ask_cross[my_id] = 0; car_state = waiting; crossing_time = 0; asked = 0; action!car_end,2, my_id
+
+		:: (s_response == car_cross) -&gt; ask_cross[my_id] = 2; car_state = crossing; asked = 0
+
+
+		//Para el puente
+		:: (order == car_ask &amp;&amp; bridge_state == lowered &amp;&amp; car_count &lt; max_car) -&gt;  cur_seq_ship = 0; cur_seq_car++; car_count++; response!car_cross,type_id, vehicle_id
+
+		:: (order == ship_ask &amp;&amp; bridge_state == raised &amp;&amp; ship_count &lt; max_ship) -&gt; cur_seq_car = 0; cur_seq_ship++; ship_count++; response!ship_cross,type_id, vehicle_id
+
+		:: (order == car_ask &amp;&amp; cur_seq_car &gt;= max_seq_car) -&gt; response!car_wait,type_id, vehicle_id
+		:: (order == ship_ask &amp;&amp; cur_seq_ship &gt;= max_seq_ship) -&gt; response!ship_wait,type_id, vehicle_id
+
+		:: (bridge_state == raising &amp;&amp; raising_time &gt;= max_rt) -&gt; cur_seq_car = 0; cur_seq_ship++; raising_time = 0; bridge_state = raised; ship_count ++; moving_bridge = 0; response!ship_cross,type_id, vehicle_id
+
+		:: (bridge_state == lowering &amp;&amp; lowering_time &gt;= max_lt) -&gt; cur_seq_ship = 0; cur_seq_car++; lowering_time = 0; bridge_state = lowered; car_count ++; moving_bridge = 0; response!car_cross,type_id, vehicle_id </code></pre>
+
+		<p>&nbsp;</p>
+
+		<h3 style="border-bottom:1.0px solid blue; color:blue">Conclusiones</h3>
+
+		<p><span style="font-size:16.0px"><span style="color:#2980b9">Dificultades</span></span><span style="font-size:18.0px"><span style="color:#2980b9"></span></span></p>
+
+		<p>Lo m&aacute;s costoso ha sido la&nbsp;b&uacute;squeda de errores detectados en fase de verificaci&oacute;n. Es decir, en un momento dado, se cre&iacute;a que el sistema ten&iacute;a un comportamiento que, tras usar una LTL para verificarlo, no se cumpl&iacute;a. Se ha tenido que rehacer el modelo porque tras analizar algunas trazas se ve&iacute;a que hab&iacute;an estados que no aportaban nada al sistema. Eliminar estos estados forma parte de otra de las tareas m&aacute;s costosas en este proyecto: reducir el espacio de b&uacute;squeda de los estados. Debemos tener en cuenta que estamos limitados por un tama&ntilde;o de estados m&aacute;ximo y por una memoria f&iacute;sica disponible, por lo que debemos abstraer al m&aacute;ximo nuestro modelo.</p>
+
+		<p>Otro de los problemas han sido la simulaci&oacute;n del tiempo. Para hacer el sistema medianamente realista, se ha a&ntilde;adido un &quot;tiempo de cruzado&quot;, esto es, el&nbsp;tiempo que tarda un coche o un barco en cruzar el puente. Se ha detectado en algunas trazas que un coche pod&iacute;a empezar a cruzar el puente y luego no actualizaba el tiempo porque el sistema no le daba paso en la ejecuci&oacute;n.&nbsp;</p>
+
+		<p><span style="font-size:16.0px"><span style="color:#2980b9">Propuestas de mejora</span></span></p>
+
+		<p>Como mejora para este proyecto se ha detectado que la propuesta para implementar justicia no es suficientemente realista o buena. Es decir, lo que se ha implementado es: &quot;solo pueden pasar 3 vehiculos del mismo tipo consecutivamente, tras estos 3 deben pasar de forma obligatoria&nbsp;3 veh&iacute;culos del tipo contrario&quot;. Lo cual, no es para nada realista. Lo mejor ser&iacute;a, por ejemplo, implementar un sem&aacute;foro. De manera que pasen 3 veh&iacute;culos del mismo tipo y despu&eacute;s se active el sem&aacute;foro para los del tipo contrario. Si pasado <em>&quot;X&quot;</em> tiempo no ha cruzado ninguno, vuelven a pasar los del tipo inicial.</p>
+
+		<p>En un caso pr&aacute;ctico; imaginando que hay 9 coches y 1 barco y primero (por el motivo que sea) cruza un coche, El sistema actual se quedar&iacute;a bloqueado en &quot;Han pasado 3 coches y 1 barco, el resto de coches est&aacute;n esperando (a que pasen 2 barcos m&aacute;s)&quot;.</p>
+
+		<p>En la verificaci&oacute;n, actualmente tenemos la ltl &quot;v_asks&quot; que verifica que &quot;si cualquier veh&iacute;culo pide para pasar, en alg&uacute;n momento pasar&aacute;&quot;. Realmente lo que se quer&iacute;a verificar es que &quot;si <strong>alg&uacute;n</strong> veh&iacute;culo pide para pasar, en alg&uacute;n momento pasar&aacute;&quot;. No se ha conseguido verificar esta &uacute;ltima propiedad. Probablemente, con a la propuesta de mejora mencionada anteriormente (sem&aacute;foro) se podr&iacute;a verificar.</p>
+
+		<p>En cuanto a la dificultad de la simulaci&oacute;n de tiempo, propondr&iacute;a hacer un contador global de acciones y basarse en este contador para priorizar a los agentes que lleven m&aacute;s tiempo sin&nbsp;realizar acciones.</p>
+
+		<p>&nbsp;</p>
+
+		<p><u>Aunque una verificaci&oacute;n no se cumpla, no tiene porque estar mal. Es decir, justificar que una propiedad no es cumple puede enriquecer la compresi&oacute;n del modelo. Por ejemplo,&nbsp; no podemos asegurar que&nbsp;<strong>todos</strong>&nbsp;los veh&iacute;culos puedan pasar porque el modelo no lo permite. Esto lo hemos averiguado gracias a que no se cumple una de las propiedades de verificaci&oacute;n.</u></p>
+
+		<p>&nbsp;</p>
+
+		<p><span style="font-size:16.0px"><span style="color:#2980b9">Punto de vista personal</span></span></p>
+
+		<p>Creo que con SPIN y PROMELA podemos realizar modelos de cualquier tipo de sistema para verificar propiedades concurrentes. Sin embargo, la complejidad de implementaci&oacute;n y de abstracci&oacute;n deben estar muy bien cuidadas. Hay que tener en cuenta la escalabilidad del modelo, por ejemplo, en el caso del puente se han usado &uacute;nicamente 3 coches y 3 barcos porque es la cantidad m&iacute;nima y hay que tener en cuenta que el sistema debe funcionar igual con 6 veh&iacute;culos que con miles de ellos (en la verificaci&oacute;n ser&iacute;a imposible computacionalmente con un sistema con miles de agentes, por eso abstraemos).</p>
+
+		<p>&nbsp;</p>
+	
+	</div>
+
+</body>
+</html>
